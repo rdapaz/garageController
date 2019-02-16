@@ -1,10 +1,7 @@
+#! /usr/bin/env python3
 import RPi.GPIO as GPIO
-import paho.mqtt.client as mqtt
+from flask import Flask, render_template
 import time
-import logging
-import datetime
-
-# This is a test
 
 class GarageDoorController:
 
@@ -28,7 +25,7 @@ class GarageDoorController:
         GPIO.setup(self.ECHO, GPIO.IN)
         GPIO.setup(self.RELAY_OUT, GPIO.OUT)
 
-    def scanGarageStatus(self):
+    def getGarageStatus(self):
         """
             Checks whether the garage is open or closed
         """
@@ -50,60 +47,36 @@ class GarageDoorController:
 
         return self.status
 
-    def toggleGarage(self):
-        print('Garage would have opened')
-        # GPIO.output(RELAY_OUT, True)
-        # time.sleep(DELAY)
-        # GPIO.output(RELAY_OUT, GPIO.LOW)
+    def toggleGarage(self, action):
+        # GPIO.output(self.RELAY_OUT, True)
+        # time.sleep(self.DELAY)
+        # GPIO.output(self.RELAY_OUT, GPIO.LOW)
+        return True
+        
 
+
+app = Flask(__name__)
+global g
+g = GarageDoorController()
+
+
+@app.route('/')
+def index():
+    templateData = {
+        'garageStatus' : g.getGarageStatus()
+    }
+    return render_template('main.html', **templateData)
+
+@app.route('/garage/<action>')
+def action(action):
+    if action in ('open', 'close'):
+        g.toggleGarage(action)
+        time.sleep(5)
+        return index()
 
 if __name__ == '__main__':
     
-    MQTT_SERVER = '10.11.12.118'
-    
-    lastStatus = False
-    garageStatus = ''
-    global toggleGarage
-    toggleGarage = False
-
-    g = GarageDoorController()
-    
-
-    def on_connect(client, userdata, flags, rc):
-        print("Connected With Result Code {}".format(rc))
-        client.subscribe('garage/command')
-    
-    def on_message(client, userdata, message):
-        print(str(message.payload))
-        if message.topic == 'garage/command':
-            if message.payload.decode() in ('open', 'close'):
-                toggleGarage = True
-            else:
-                toggleGarage = False
-    
-    client = mqtt.Client('garage_controller')
-    client.on_connect = on_connect
-    client.on_message = on_message
-    client.connect(MQTT_SERVER, 1883, 60)
-    client.loop_start()
-    time.sleep(1)
-    
-
-    while True:
-        try:
-            garageStatus = g.scanGarageStatus()
-            if garageStatus != lastStatus:
-                print(garageStatus)
-                client.publish(topic='garage/status',
-                               payload=garageStatus,
-                               qos=0,
-                               retain=False)
-                lastStatus = garageStatus
-
-            if toggleGarage:
-                g.toggleGarage()
-            time.sleep(5)
-        except KeyboardInterrupt:
-            GPIO.cleanup()
-            client.loop_stop()
-            client.disconnect()
+    try:   
+        app.run(host='0.0.0.0', port=80, debug=True)
+    except KeyboardInterrupt:
+        GPIO.cleanup()

@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<head>
+   <title>Garage Controller</title>
+   <!-- Latest compiled and minified CSS -->
+   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" crossorigin="anonymous">
+   <!-- Latest compiled and minified JavaScript -->
+   <script src=https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js" crossorigin="anonymous"></script>
+</head>
+
+<body>
+   <h1>Garage is <bold>{{ garageStatus }}</bold><h1>
+   </br>
+   {% if garageStatus == 'Open' %}
+      <div class="col-md-2">
+      <a href="/garage/close" class="btn btn-block btn-lg btn-primary" role="button">Close</a>
+      </div>
+   {% else %}
+      <div class="col-md-2">
+      <a href="/garage/open" class="btn btn-block btn-lg btn-primary" role="button">Open
+      </a></div></div>
+   {% endif %}
+</body>
+</html>
