@@ -1,0 +1,16 @@
+[Unit]
+Description=uWSGI instance to serve garage controller
+After=network.target
+
+[Service]
+User=pi
+Group=www-data
+WorkingDirectory=/home/pi/garageController
+Environment="PATH=/home/pi/venv/bin"
+ExecStart=/home/pi/venv/bin/uwsgi --ini uwsgi.ini
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=multi-user.target

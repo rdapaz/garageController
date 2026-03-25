@@ -1,70 +1,141 @@
-# Getting Started with Create React App
+# Raspberry Pi Garage Door Controller
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A web-based garage door controller using a Raspberry Pi, ultrasonic sensor (HC-SR04), and relay module. Features real-time status monitoring, event logging with source tracking, dark mode, and WebSocket-based live updates.
 
-## Available Scripts
+## Features
 
-In the project directory, you can run:
+- Real-time garage door status monitoring via ultrasonic sensor
+- React frontend with Tailwind CSS and dark mode support
+- SQLAlchemy ORM with event source tracking (remote sensor vs app-triggered)
+- Timezone-aware timestamps (AWST)
+- WebSocket support for live status updates
+- Mobile-responsive design
+- Nginx reverse proxy with WebSocket passthrough
 
-### `npm start`
+## Hardware Requirements
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+- Raspberry Pi (tested on Pi 3A+)
+- HC-SR04 Ultrasonic Sensor
+- Relay Module
+- Garage door opener
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+## GPIO Pin Configuration
 
-### `npm test`
+| Pin     | GPIO |
+|---------|------|
+| TRIGGER | 16   |
+| ECHO    | 26   |
+| RELAY   | 24   |
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+## Software Requirements
 
-### `npm run build`
+- Raspberry Pi OS (Debian-based)
+- Python 3.6+
+- Node.js 14+ (for building the frontend)
+- Nginx
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+## Project Structure
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+```
+.
++-- backend/
+|   +-- main.py                    # FastAPI application
+|   +-- uwsgi.ini                  # uWSGI configuration
+|   +-- garage-controller.service  # systemd service file
+|   +-- requirements.txt           # Python dependencies
++-- src/                           # React source (App.js, index.js, etc.)
++-- public/                        # Static assets
++-- nginx/
+|   +-- sites-available            # Nginx site configuration
++-- setup/
+|   +-- install.sh                 # Automated installation script
+|   +-- setup_database.sh          # Database initialisation script
++-- package.json                   # Node.js dependencies
++-- tailwind.config.js             # Tailwind CSS configuration
+```
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+## Installation
 
-### `npm run eject`
+### 1. Clone the Repository
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+```bash
+git clone https://github.com/rdapaz/garageController.git
+cd garageController
+```
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+### 2. Run Installation Script
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+```bash
+chmod +x setup/install.sh
+./setup/install.sh
+```
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+### 3. Build Frontend
 
-## Learn More
+On your development machine (with Node.js installed):
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+```bash
+npm install
+npm run build
+```
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+Transfer the `build` folder to `/home/pi/garageController/build` on your Raspberry Pi.
 
-### Code Splitting
+### 4. Configure
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+Update paths in the following files if needed:
 
-### Analyzing the Bundle Size
+- `backend/main.py`: Update the StaticFiles directory path
+- `backend/uwsgi.ini`: Update the chdir path
+- `backend/garage-controller.service`: Update WorkingDirectory and paths
+- `nginx/sites-available`: Update server_name and paths
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+### 5. Start the Service
 
-### Making a Progressive Web App
+```bash
+sudo systemctl start garage-controller
+sudo systemctl status garage-controller
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+## Usage
 
-### Advanced Configuration
+Access the web interface at `http://your-pi-ip-address` or `http://garagecontroller.local`
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+## Troubleshooting
 
-### Deployment
+### Check Service Status
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+```bash
+sudo systemctl status garage-controller
+```
 
-### `npm run build` fails to minify
+### View Logs
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+```bash
+sudo journalctl -u garage-controller -n 50
+```
+
+### Check Nginx Logs
+
+```bash
+sudo tail -f /var/log/nginx/garage-controller-error.log
+```
+
+### Restart Services
+
+```bash
+sudo systemctl restart garage-controller
+sudo systemctl restart nginx
+```
+
+## Setting Static IP
+
+```bash
+sudo nmcli connection modify "Your-WiFi-SSID" ipv4.addresses 192.168.1.100/24 ipv4.gateway 192.168.1.1 ipv4.dns "8.8.8.8" ipv4.method manual
+sudo nmcli connection down "Your-WiFi-SSID"
+sudo nmcli connection up "Your-WiFi-SSID"
+```
+
+## Licence
+
+MIT
