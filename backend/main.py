@@ -1,5 +1,6 @@
-from fastapi import FastAPI, WebSocket, HTTPException
+from fastapi import FastAPI, WebSocket, HTTPException, Depends, Request
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 import RPi.GPIO as GPIO
 import time
@@ -9,8 +10,65 @@ import sqlite3
 from datetime import datetime, timedelta
 import threading
 from typing import Optional
+import jwt
+import os
+import bcrypt as bcrypt_lib
 
 app = FastAPI()
+security = HTTPBearer(auto_error=False)
+
+# JWT Configuration
+JWT_SECRET = os.environ.get("GARAGE_JWT_SECRET", "garage-controller-secret-change-me")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRY_HOURS = 24
+
+# Auth helpers
+def hash_password(password: str) -> str:
+    return bcrypt_lib.hashpw(password.encode('utf-8'), bcrypt_lib.gensalt()).decode('utf-8')
+
+def verify_password(password: str, hashed: str) -> bool:
+    return bcrypt_lib.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+
+def create_token(username: str) -> str:
+    payload = {
+        "sub": username,
+        "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRY_HOURS),
+        "iat": datetime.utcnow()
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+def decode_token(token: str) -> dict:
+    try:
+        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    payload = decode_token(credentials.credentials)
+    return payload["sub"]
+
+async def get_optional_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Returns username if authenticated, None otherwise"""
+    if credentials is None:
+        return None
+    try:
+        payload = decode_token(credentials.credentials)
+        return payload["sub"]
+    except HTTPException:
+        return None
+
+# Pydantic models for auth
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 # Database setup
 def init_db():
@@ -41,10 +99,44 @@ def init_db():
                   active BOOLEAN DEFAULT 1,
                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP)''')
     
+    # Admin user table
+    c.execute('''CREATE TABLE IF NOT EXISTS admin_user
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  username TEXT NOT NULL UNIQUE,
+                  password_hash TEXT NOT NULL,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+
     conn.commit()
     conn.close()
 
 init_db()
+
+# Create default admin user if none exists
+def init_admin():
+    with sqlite3.connect('garage.db') as conn:
+        c = conn.cursor()
+        c.execute("SELECT password_hash FROM admin_user WHERE username = 'admin'")
+        row = c.fetchone()
+        default_password = os.environ.get("GARAGE_ADMIN_PASSWORD", "changeme")
+        hashed = hash_password(default_password)
+        if row is None:
+            c.execute("INSERT INTO admin_user (username, password_hash) VALUES (?, ?)",
+                     ("admin", hashed))
+            conn.commit()
+            if default_password == "changeme":
+                print("[AUTH] WARNING: Default admin password in use. Set GARAGE_ADMIN_PASSWORD env var or change via API.")
+            else:
+                print("[AUTH] Admin user created with custom password")
+        else:
+            # Verify existing hash is valid, reset if corrupted
+            try:
+                verify_password("test", row[0])
+            except Exception:
+                print("[AUTH] Existing password hash is corrupted, resetting to default")
+                c.execute("UPDATE admin_user SET password_hash = ? WHERE username = 'admin'", (hashed,))
+                conn.commit()
+
+init_admin()
 
 # Pydantic models
 class LPRDetection(BaseModel):
@@ -317,6 +409,56 @@ class GarageDoorController:
 
 controller = GarageDoorController()
 
+# Login attempt tracking for rate limiting
+login_attempts = {}
+
+# Auth endpoints
+@app.post("/api/auth/login")
+async def login(request: LoginRequest):
+    """Authenticate and return JWT token"""
+    # Rate limiting: max 5 attempts per minute per username
+    now = time.time()
+    key = request.username
+    if key in login_attempts:
+        attempts = [t for t in login_attempts[key] if now - t < 60]
+        login_attempts[key] = attempts
+        if len(attempts) >= 5:
+            raise HTTPException(status_code=429, detail="Too many login attempts. Try again in 60 seconds.")
+    else:
+        login_attempts[key] = []
+
+    with sqlite3.connect('garage.db') as conn:
+        c = conn.cursor()
+        c.execute("SELECT password_hash FROM admin_user WHERE username = ?", (request.username,))
+        row = c.fetchone()
+
+    if row and verify_password(request.password, row[0]):
+        login_attempts.pop(key, None)
+        token = create_token(request.username)
+        return {"token": token, "username": request.username}
+
+    login_attempts.setdefault(key, []).append(now)
+    raise HTTPException(status_code=401, detail="Invalid credentials")
+
+@app.get("/api/auth/verify")
+async def verify_token(user: str = Depends(get_current_user)):
+    """Verify current token is valid"""
+    return {"authenticated": True, "username": user}
+
+@app.post("/api/auth/change-password")
+async def change_password(request: ChangePasswordRequest, user: str = Depends(get_current_user)):
+    """Change password for authenticated user"""
+    with sqlite3.connect('garage.db') as conn:
+        c = conn.cursor()
+        c.execute("SELECT password_hash FROM admin_user WHERE username = ?", (user,))
+        row = c.fetchone()
+        if not row or not verify_password(request.current_password, row[0]):
+            raise HTTPException(status_code=400, detail="Current password incorrect")
+        new_hash = hash_password(request.new_password)
+        c.execute("UPDATE admin_user SET password_hash = ? WHERE username = ?", (new_hash, user))
+        conn.commit()
+    return {"status": "success", "message": "Password changed"}
+
 # WebSocket endpoint
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -352,7 +494,7 @@ async def get_events():
     return {"events": controller.get_last_10_events()}
 
 @app.post("/api/toggle")
-async def toggle_garage():
+async def toggle_garage(user: str = Depends(get_current_user)):
     new_status = controller.toggle_garage()
     events = controller.get_last_10_events()
     return {"status": new_status, "events": events}
@@ -390,7 +532,7 @@ async def unifi_webhook_post(webhook: dict):
     return {"status": "error", "message": "No plate number in webhook body"}
 
 @app.post("/api/lpr/cancel")
-async def cancel_auto_close():
+async def cancel_auto_close(user: str = Depends(get_current_user)):
     """Cancel pending auto-close"""
     cancelled = controller.cancel_auto_close()
     if cancelled:
@@ -399,7 +541,7 @@ async def cancel_auto_close():
     return {"status": "error", "message": "No pending auto-close"}
 
 @app.post("/api/lpr/plates")
-async def add_authorized_plate(plate: AuthorizedPlate):
+async def add_authorized_plate(plate: AuthorizedPlate, user: str = Depends(get_current_user)):
     """Add authorized plate"""
     normalized = normalize_plate(plate.plate_number)
     try:
@@ -413,17 +555,23 @@ async def add_authorized_plate(plate: AuthorizedPlate):
         raise HTTPException(status_code=400, detail="Plate already exists")
 
 @app.get("/api/lpr/plates")
-async def get_authorized_plates():
-    """Get all authorized plates"""
+async def get_authorized_plates(user: str = Depends(get_optional_user)):
+    """Get all authorized plates - masked if not authenticated"""
     with sqlite3.connect('garage.db') as conn:
         c = conn.cursor()
         c.execute("SELECT plate_number, owner_name, active, created_at FROM authorized_plates ORDER BY created_at DESC")
-        plates = [{"plate": row[0], "owner": row[1], "active": bool(row[2]), "created_at": row[3]} 
-                 for row in c.fetchall()]
+        plates = []
+        for row in c.fetchall():
+            plate_display = row[0]
+            owner_display = row[1]
+            if user is None and len(plate_display) > 4:
+                plate_display = plate_display[:2] + "*" * (len(plate_display) - 4) + plate_display[-2:]
+                owner_display = ""
+            plates.append({"plate": plate_display, "owner": owner_display, "active": bool(row[2]), "created_at": row[3]})
     return {"plates": plates}
 
 @app.delete("/api/lpr/plates/{plate_number}")
-async def remove_authorized_plate(plate_number: str):
+async def remove_authorized_plate(plate_number: str, user: str = Depends(get_current_user)):
     """Deactivate authorized plate"""
     normalized = normalize_plate(plate_number)
     with sqlite3.connect('garage.db') as conn:
@@ -435,7 +583,7 @@ async def remove_authorized_plate(plate_number: str):
     return {"status": "success", "message": f"Plate {plate_number} deactivated"}
 
 @app.get("/api/lpr/events")
-async def get_lpr_events(limit: int = 20):
+async def get_lpr_events(limit: int = 20, user: str = Depends(get_current_user)):
     """Get recent LPR events"""
     with sqlite3.connect('garage.db') as conn:
         c = conn.cursor()
