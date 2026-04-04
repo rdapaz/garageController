@@ -1,23 +1,256 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { DoorOpen, DoorClosed, Loader } from 'lucide-react';
+import { DoorOpen, DoorClosed, Loader, AlertTriangle, X, Plus, Trash2, Car, Clock } from 'lucide-react';
+
+function EventList({ events }) {
+  const formatEventTime = (timestamp) => {
+    // SQLite CURRENT_TIMESTAMP is UTC — append Z so the browser knows
+    const utcTimestamp = timestamp.endsWith('Z') ? timestamp : timestamp + 'Z';
+    return new Date(utcTimestamp).toLocaleString('en-AU', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+  };
+
+  return (
+    <div className="bg-white shadow sm:rounded-lg mt-6">
+      <div className="px-4 py-5 sm:p-6">
+        <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">
+          Recent Events
+        </h3>
+        {events.length === 0 ? (
+          <p className="text-sm text-gray-500">No events recorded yet.</p>
+        ) : (
+          <ul className="divide-y divide-gray-200">
+            {events.map((event, index) => (
+              <li key={index} className="py-3 flex items-center justify-between">
+                <div className="flex items-center">
+                  {event[0] === 'Open' ? (
+                    <DoorOpen className="h-5 w-5 text-green-400 mr-3" />
+                  ) : (
+                    <DoorClosed className="h-5 w-5 text-red-400 mr-3" />
+                  )}
+                  <span className="text-sm font-medium text-gray-900">
+                    Garage {event[0]}
+                  </span>
+                </div>
+                <span className="text-sm text-gray-500">
+                  {formatEventTime(event[1])}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LPRNotification({ countdown, plate, onCancel }) {
+  if (countdown <= 0) return null;
+
+  return (
+    <div className="fixed top-4 right-4 max-w-sm w-full bg-yellow-50 border-l-4 border-yellow-400 p-4 shadow-lg rounded-lg z-50 animate-pulse">
+      <div className="flex">
+        <div className="flex-shrink-0">
+          <AlertTriangle className="h-5 w-5 text-yellow-400" />
+        </div>
+        <div className="ml-3 flex-1">
+          <p className="text-sm font-medium text-yellow-800">
+            Auto-closing in {countdown} seconds
+          </p>
+          <p className="text-xs text-yellow-700 mt-1">
+            Detected: {plate}
+          </p>
+          <button
+            onClick={onCancel}
+            className="mt-2 text-xs font-medium text-yellow-800 hover:text-yellow-900 underline"
+          >
+            Cancel auto-close
+          </button>
+        </div>
+        <div className="ml-3 flex-shrink-0">
+          <button
+            onClick={onCancel}
+            className="inline-flex text-yellow-400 hover:text-yellow-500"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LPRManagement() {
+  const [plates, setPlates] = useState([]);
+  const [newPlate, setNewPlate] = useState('');
+  const [newOwner, setNewOwner] = useState('');
+  const [showForm, setShowForm] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetchPlates();
+  }, []);
+
+  const fetchPlates = async () => {
+    try {
+      const response = await axios.get('/api/lpr/plates');
+      setPlates(response.data.plates);
+    } catch (error) {
+      console.error('Error fetching plates:', error);
+    }
+  };
+
+  const addPlate = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await axios.post('/api/lpr/plates', {
+        plate_number: newPlate.toUpperCase(),
+        owner_name: newOwner
+      });
+      setNewPlate('');
+      setNewOwner('');
+      setShowForm(false);
+      fetchPlates();
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Error adding plate');
+    }
+    setLoading(false);
+  };
+
+  const removePlate = async (plate) => {
+    if (!window.confirm(`Remove plate ${plate}?`)) return;
+    try {
+      await axios.delete(`/api/lpr/plates/${plate}`);
+      fetchPlates();
+    } catch (error) {
+      alert('Error removing plate');
+    }
+  };
+
+  return (
+    <div className="bg-white shadow sm:rounded-lg mt-6">
+      <div className="px-4 py-5 sm:p-6">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg leading-6 font-medium text-gray-900">
+            Authorized Plates
+          </h3>
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
+          >
+            <Plus className="h-4 w-4 mr-1" />
+            Add Plate
+          </button>
+        </div>
+
+        {showForm && (
+          <form onSubmit={addPlate} className="mb-4 p-4 bg-gray-50 rounded-lg">
+            <div className="grid grid-cols-2 gap-3">
+              <input
+                type="text"
+                placeholder="Plate Number"
+                value={newPlate}
+                onChange={(e) => setNewPlate(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+                required
+              />
+              <input
+                type="text"
+                placeholder="Owner Name"
+                value={newOwner}
+                onChange={(e) => setNewOwner(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+              />
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="submit"
+                disabled={loading}
+                className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 disabled:bg-gray-400"
+              >
+                {loading ? 'Adding...' : 'Add'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                className="px-4 py-2 bg-gray-300 text-gray-700 text-sm rounded-md hover:bg-gray-400"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+
+        <ul className="divide-y divide-gray-200">
+          {plates.filter(p => p.active).map((plate, index) => (
+            <li key={index} className="py-3 flex items-center justify-between">
+              <div className="flex items-center">
+                <Car className="h-5 w-5 text-indigo-400 mr-3" />
+                <div>
+                  <span className="text-sm font-medium text-gray-900">{plate.plate}</span>
+                  {plate.owner && (
+                    <span className="text-xs text-gray-500 ml-2">({plate.owner})</span>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={() => removePlate(plate.plate)}
+                className="text-red-600 hover:text-red-800"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </li>
+          ))}
+          {plates.filter(p => p.active).length === 0 && (
+            <li className="py-3 text-sm text-gray-500">No authorized plates yet</li>
+          )}
+        </ul>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const [status, setStatus] = useState('Unknown');
+  const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(new Date());
-  const [events, setEvents] = useState([]);
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+  const [pendingPlate, setPendingPlate] = useState(null);
 
-  // WebSocket handling
   const setupWebSocket = useCallback(() => {
     const ws = new WebSocket(`ws://${window.location.host}/ws`);
-
+    
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      setStatus(data.status);
-      setLastUpdated(new Date());
-      fetchEvents();  // Update events whenever a WebSocket message is received
+      
+      if (data.type === 'status_update') {
+        setStatus(data.status);
+        if (data.events) {
+          setEvents(data.events);
+        }
+        if (data.countdown !== undefined) {
+          setCountdown(data.countdown);
+        }
+        if (data.pending_close_plate !== undefined) {
+          setPendingPlate(data.pending_close_plate);
+        }
+        setLastUpdated(new Date());
+      } else if (data.type === 'lpr_status') {
+        if (data.data.action === 'countdown') {
+          setCountdown(data.data.seconds_remaining);
+          setPendingPlate(data.data.plate);
+        } else if (data.data.action === 'cancelled' || data.data.action === 'cancelled_by_user') {
+          setCountdown(0);
+          setPendingPlate(null);
+        }
+      }
     };
 
     ws.onclose = () => {
@@ -25,45 +258,35 @@ export default function App() {
       setTimeout(setupWebSocket, 1000);
     };
 
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
+    const interval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send('ping');
+      }
+    }, 30000);
+
     return () => {
+      clearInterval(interval);
       ws.close();
     };
   }, []);
 
-  // Toggle dark mode
-  const toggleDarkMode = () => {
-    setIsDarkMode(!isDarkMode);
-    if (isDarkMode) {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('theme', 'light');
-    } else {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
-    }
-  };
-
-  // Fetch saved theme preference on load
-  useEffect(() => {
-    const savedTheme = localStorage.getItem('theme');
-    if (savedTheme === 'dark') {
-      setIsDarkMode(true);
-      document.documentElement.classList.add('dark');
-    }
-  }, []);
-
-  // Fetch the last 10 events
-  const fetchEvents = async () => {
-    try {
-      const response = await axios.get('/api/events');
-      setEvents(response.data);
-    } catch (error) {
-      console.error('Error fetching events:', error);
-    }
-  };
-
   useEffect(() => {
     const cleanup = setupWebSocket();
-    fetchEvents();  // Fetch initial events
+    
+    const fetchEvents = async () => {
+      try {
+        const response = await axios.get('/api/events');
+        setEvents(response.data.events);
+      } catch (error) {
+        console.error('Error fetching events:', error);
+      }
+    };
+    fetchEvents();
+    
     return cleanup;
   }, [setupWebSocket]);
 
@@ -72,12 +295,24 @@ export default function App() {
     try {
       const response = await axios.post('/api/toggle');
       setStatus(response.data.status);
+      if (response.data.events) {
+        setEvents(response.data.events);
+      }
       setLastUpdated(new Date());
-      fetchEvents();  // Fetch updated events after toggling
     } catch (error) {
       console.error('Error toggling garage:', error);
     }
     setLoading(false);
+  };
+
+  const cancelAutoClose = async () => {
+    try {
+      await axios.post('/api/lpr/cancel');
+      setCountdown(0);
+      setPendingPlate(null);
+    } catch (error) {
+      console.error('Error cancelling auto-close:', error);
+    }
   };
 
   const formatLastUpdated = (date) => {
@@ -87,95 +322,88 @@ export default function App() {
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-      second: '2-digit',
+      second: '2-digit'
     });
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center px-4 py-12">
+      <LPRNotification countdown={countdown} plate={pendingPlate} onCancel={cancelAutoClose} />
+      
       <div className="max-w-md w-full space-y-8">
         <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900 dark:text-white">
+          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
             Garage Door Controller
           </h2>
-          <p className="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">
-            (c) Ricdeez 2024
+          <p className="mt-2 text-center text-sm text-gray-600">
+            Monitor and control your garage door
           </p>
         </div>
-
-        {/* Dark Mode Toggle */}
-        <div className="text-center">
-          <button
-            onClick={toggleDarkMode}
-            className="py-2 px-4 rounded-md text-sm font-medium bg-indigo-600 text-white dark:bg-yellow-500"
-          >
-            {isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-          </button>
-        </div>
-
+        
         <div className="mt-8 space-y-6">
-          <div className="bg-white dark:bg-gray-800 shadow sm:rounded-lg">
+          <div className="bg-white shadow sm:rounded-lg">
             <div className="px-4 py-5 sm:p-6">
-              <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-white">
+              <h3 className="text-lg leading-6 font-medium text-gray-900">
                 Current Status
               </h3>
-              <div className="mt-5 flex items-center">
-                {status === 'Open' ? (
-                  <DoorOpen className="h-8 w-8 text-green-400" aria-hidden="true" />
-                ) : status === 'Closed' ? (
-                  <DoorClosed className="h-8 w-8 text-red-400" aria-hidden="true" />
-                ) : (
-                  <Loader className="h-8 w-8 text-gray-400 animate-spin" aria-hidden="true" />
-                )}
-                <div className="ml-4 text-sm font-medium text-gray-900 dark:text-white">
-                  The garage door is currently {status ? status.toLowerCase() : 'unknown'}
+              <div className="mt-5">
+                <div className="rounded-md bg-gray-50 px-6 py-5 sm:flex sm:items-start sm:justify-between">
+                  <div className="sm:flex sm:items-center w-full">
+                    {status === 'Open' ? (
+                      <DoorOpen className="h-8 w-8 text-green-400" aria-hidden="true" />
+                    ) : status === 'Closed' ? (
+                      <DoorClosed className="h-8 w-8 text-red-400" aria-hidden="true" />
+                    ) : (
+                      <Loader className="h-8 w-8 text-gray-400 animate-spin" aria-hidden="true" />
+                    )}
+                    <div className="mt-3 sm:mt-0 sm:ml-4 flex-1">
+                      <div className="text-sm font-medium text-gray-900">
+                        The garage door is currently {status.toLowerCase()}
+                      </div>
+                      {countdown > 0 && (
+                        <div className="mt-2 flex items-center text-yellow-700 text-xs">
+                          <Clock className="h-4 w-4 mr-1" />
+                          Closing in {countdown}s
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div className="mt-5">
-                <button
-                  onClick={toggleGarage}
-                  disabled={loading}
-                  className={`group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white dark:bg-indigo-500 dark:hover:bg-indigo-600 ${
-                    loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'
-                  }`}
-                >
-                  {loading ? <Loader className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" /> : null}
-                  {loading ? 'Working on it...' : 'Toggle Garage Door'}
-                </button>
-              </div>
             </div>
           </div>
-
-          <div className="bg-white dark:bg-gray-800 shadow sm:rounded-lg">
-            <div className="px-4 py-5 sm:p-6">
-              <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-white">Last 10 Events</h3>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                  <thead className="bg-gray-50 dark:bg-gray-700">
-                    <tr>
-                      <th className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Status
-                      </th>
-                      <th className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Timestamp
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {events.map((event, index) => (
-                      <tr key={index} className={index % 2 === 0 ? 'bg-gray-100 dark:bg-gray-900' : 'bg-white dark:bg-gray-800'}>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{event.status}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{new Date(event.timestamp).toLocaleString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+          
+          <div className="flex gap-2">
+            <button
+              onClick={toggleGarage}
+              disabled={loading}
+              className={`flex-1 group relative flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white ${
+                loading
+                  ? 'bg-gray-400 cursor-not-allowed'
+                  : 'bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500'
+              }`}
+            >
+              {loading ? (
+                <Loader className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" />
+              ) : null}
+              {loading ? 'Processing...' : 'Toggle Garage Door'}
+            </button>
+            
+            {countdown > 0 && (
+              <button
+                onClick={cancelAutoClose}
+                className="px-4 py-2 border border-red-300 text-sm font-medium rounded-md text-red-700 bg-white hover:bg-red-50"
+              >
+                Cancel
+              </button>
+            )}
           </div>
-
+          
+          <EventList events={events} />
+          <LPRManagement />
+          
           <div className="text-center mt-4">
-            <p className="text-sm text-gray-500 dark:text-gray-400">
+            <p className="text-sm text-gray-500">
               Last updated: {formatLastUpdated(lastUpdated)}
             </p>
           </div>
