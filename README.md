@@ -1,16 +1,20 @@
 # Raspberry Pi Garage Door Controller
 
-A web-based garage door controller using a Raspberry Pi, ultrasonic sensor (HC-SR04), and relay module. Features real-time status monitoring, event logging with source tracking, dark mode, and WebSocket-based live updates.
+A web-based garage door controller using a Raspberry Pi, ultrasonic sensor (HC-SR04), and relay module. Integrates with UniFi Protect for automatic licence plate recognition (LPR) to open and close the garage door when authorised vehicles are detected.
 
 ## Features
 
 - Real-time garage door status monitoring via ultrasonic sensor
-- React frontend with Tailwind CSS and dark mode support
-- SQLAlchemy ORM with event source tracking (remote sensor vs app-triggered)
-- Timezone-aware timestamps (AWST)
+- **UniFi Protect LPR integration** via webhook (auto-open/close on plate detection)
+- **Authorised plate management** with web UI and API
+- **Plate normalisation** (hyphens, spaces, and case are stripped automatically)
+- **Auto-close countdown** (60s) with cancellable WebSocket notifications
+- React frontend with Tailwind CSS
+- Timezone-aware timestamps (UTC storage, local display in en-AU)
 - WebSocket support for live status updates
-- Mobile-responsive design
+- Optional MQTT integration for Home Assistant / monitoring
 - Nginx reverse proxy with WebSocket passthrough
+- Mobile-responsive design
 
 ## Hardware Requirements
 
@@ -40,8 +44,8 @@ A web-based garage door controller using a Raspberry Pi, ultrasonic sensor (HC-S
 .
 +-- backend/
 |   +-- main.py                    # FastAPI application
-|   +-- uwsgi.ini                  # uWSGI configuration
-|   +-- garage-controller.service  # systemd service file
+|   +-- uwsgi.ini                  # uWSGI configuration (legacy)
+|   +-- garage-controller.service  # systemd service file (legacy)
 |   +-- requirements.txt           # Python dependencies
 +-- src/                           # React source (App.js, index.js, etc.)
 +-- public/                        # Static assets
@@ -50,9 +54,110 @@ A web-based garage door controller using a Raspberry Pi, ultrasonic sensor (HC-S
 +-- setup/
 |   +-- install.sh                 # Automated installation script
 |   +-- setup_database.sh          # Database initialisation script
+|   +-- LPR_Setup_Guide.docx      # UniFi Protect LPR setup guide
 +-- package.json                   # Node.js dependencies
 +-- tailwind.config.js             # Tailwind CSS configuration
 ```
+
+## Architecture
+
+```
+Browser :80 --> Nginx --> uvicorn :8080 --> FastAPI (main.py)
+                                              |
+UniFi Protect ---> GET /api/lpr/unifi-webhook?plate=ABC123
+                                              |
+                                         garage.db (SQLite)
+```
+
+- **Nginx** listens on port 80, proxies HTTP and WebSocket traffic to uvicorn on port 8080
+- **Uvicorn** runs the FastAPI app from `/home/pi/garageController`
+- **React build** is served from `/home/pi/garageController/frontend`
+- **SQLite** stores events, authorised plates, and LPR history (timestamps in UTC)
+
+## UniFi Protect LPR Integration
+
+The garage controller integrates with UniFi Protect cameras that support licence plate recognition. When an authorised plate is detected, the garage door opens or schedules an auto-close automatically.
+
+### How It Works
+
+1. UniFi Protect detects a licence plate via the G6 Bullet camera
+2. An Alarm Manager rule fires a webhook to the Raspberry Pi
+3. The garage controller checks if the plate is authorised
+4. **Door closed + authorised plate** = door opens immediately
+5. **Door open + authorised plate** = 60-second auto-close countdown starts
+6. **Unauthorised plate** = event logged, no action taken
+
+### Webhook Endpoint
+
+The primary endpoint for UniFi Protect is a simple GET request with the plate as a query parameter:
+
+```
+GET http://192.168.1.143/api/lpr/unifi-webhook?plate=ABC123
+```
+
+A POST endpoint is also available for JSON payloads:
+
+```bash
+curl -X POST http://192.168.1.143/api/lpr/unifi-webhook \
+  -H "Content-Type: application/json" \
+  -d '{"plate": "ABC123"}'
+```
+
+### UniFi Protect Setup
+
+1. Enable LPR on your camera (Settings > Smart Detections > Licence Plate)
+2. Register your vehicle as a Known Vehicle via Find Anything
+3. Create an Alarm in Alarm Manager with Vehicle ID trigger
+4. Set the action to Custom Webhook with the GET URL above
+5. See `setup/LPR_Setup_Guide.docx` for detailed instructions
+
+### Plate Normalisation
+
+Plate numbers are automatically normalised before storage and comparison. Hyphens, spaces, and lowercase characters are stripped:
+
+- `ABC-123`, `abc 123`, and `ABC123` all resolve to `ABC123`
+- This applies to plates added via the web UI, API, and incoming webhooks
+
+## API Reference
+
+### Garage Control
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/status` | Current door status, countdown, pending plate |
+| POST | `/api/toggle` | Toggle the garage door |
+| GET | `/api/events` | Last 10 status events |
+
+### LPR Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/lpr/unifi-webhook?plate=XXX` | Webhook for UniFi Protect |
+| POST | `/api/lpr/unifi-webhook` | Webhook (JSON body) |
+| POST | `/api/lpr/detect` | Manual LPR test |
+| GET | `/api/lpr/plates` | List authorised plates |
+| POST | `/api/lpr/plates` | Add authorised plate |
+| DELETE | `/api/lpr/plates/{plate}` | Remove authorised plate |
+| GET | `/api/lpr/events?limit=20` | LPR event history |
+| POST | `/api/lpr/cancel` | Cancel pending auto-close |
+
+### WebSocket
+
+Connect to `ws://192.168.1.143/ws` for real-time updates including status changes, LPR events, and auto-close countdown notifications.
+
+## MQTT (Optional)
+
+If Mosquitto is running on `localhost:1883`, the app publishes to:
+
+| Topic | Payload |
+|-------|---------|
+| `garage/status` | `Open` or `Closed` |
+| `garage/lpr/opened` | Plate number |
+| `garage/lpr/close_scheduled` | Plate number |
+| `garage/lpr/auto_closed` | Plate number |
+| `garage/lpr/unauthorized` | Plate number |
+
+If the broker is unavailable, the app starts normally without MQTT.
 
 ## Installation
 
@@ -79,23 +184,23 @@ npm install
 npm run build
 ```
 
-Transfer the `build` folder to `/home/pi/garageController/build` on your Raspberry Pi.
+Transfer the `build` folder contents to `/home/pi/garageController/frontend` on your Raspberry Pi.
 
 ### 4. Configure
 
 Update paths in the following files if needed:
 
 - `backend/main.py`: Update the StaticFiles directory path
-- `backend/uwsgi.ini`: Update the chdir path
-- `backend/garage-controller.service`: Update WorkingDirectory and paths
-- `nginx/sites-available`: Update server_name and paths
+- `nginx/sites-available`: Update server_name and proxy_pass port
 
 ### 5. Start the Service
 
 ```bash
-sudo systemctl start garage-controller
-sudo systemctl status garage-controller
+cd /home/pi/garageController
+nohup /home/pi/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8080 > /tmp/uvicorn.log 2>&1 &
 ```
+
+> **Note:** The legacy uWSGI service (`garage-controller.service`) should be stopped and disabled. Only one instance of the app should run at a time to avoid SQLite database locking errors.
 
 ## Usage
 
@@ -103,16 +208,10 @@ Access the web interface at `http://your-pi-ip-address` or `http://garagecontrol
 
 ## Troubleshooting
 
-### Check Service Status
+### Check Application Logs
 
 ```bash
-sudo systemctl status garage-controller
-```
-
-### View Logs
-
-```bash
-sudo journalctl -u garage-controller -n 50
+cat /tmp/uvicorn.log
 ```
 
 ### Check Nginx Logs
@@ -124,9 +223,27 @@ sudo tail -f /var/log/nginx/garage-controller-error.log
 ### Restart Services
 
 ```bash
-sudo systemctl restart garage-controller
+sudo pkill -f uvicorn
+cd /home/pi/garageController
+nohup /home/pi/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8080 > /tmp/uvicorn.log 2>&1 &
 sudo systemctl restart nginx
 ```
+
+### Database Locked Errors
+
+If you see `sqlite3.OperationalError: database is locked`, ensure only one instance is running:
+
+```bash
+sudo ss -tlnp | grep -E ":8000|:8080"
+sudo systemctl stop garage-controller && sudo systemctl disable garage-controller
+sudo pkill -f uwsgi
+```
+
+### Webhook Not Triggering
+
+1. Test the endpoint manually: `curl "http://192.168.1.143/api/lpr/unifi-webhook?plate=TEST123"`
+2. Check the plate is in the authorised list: `curl http://192.168.1.143/api/lpr/plates`
+3. Review LPR events: `curl http://192.168.1.143/api/lpr/events`
 
 ## Setting Static IP
 
