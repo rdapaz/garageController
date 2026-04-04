@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { DoorOpen, DoorClosed, Loader, AlertTriangle, X, Plus, Trash2, Car, Clock, LogIn, LogOut, Lock } from 'lucide-react';
+import { DoorOpen, DoorClosed, Loader, AlertTriangle, X, Plus, Trash2, Car, Clock, LogIn, LogOut, Lock, Sun, Moon } from 'lucide-react';
 
 // Configure axios interceptor for auth
 const getToken = () => localStorage.getItem('garage_token');
@@ -45,14 +45,14 @@ function LoginForm({ onLogin }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="bg-white shadow sm:rounded-lg mt-6">
+    <form onSubmit={handleSubmit} className="bg-white dark:bg-gray-800 shadow sm:rounded-lg mt-6">
       <div className="px-4 py-5 sm:p-6">
         <div className="flex items-center mb-4">
           <Lock className="h-5 w-5 text-indigo-500 mr-2" />
-          <h3 className="text-lg leading-6 font-medium text-gray-900">Sign In</h3>
+          <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-white">Sign In</h3>
         </div>
         {error && (
-          <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+          <div className="mb-3 p-2 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded text-sm text-red-700 dark:text-red-400">
             {error}
           </div>
         )}
@@ -62,7 +62,7 @@ function LoginForm({ onLogin }) {
             placeholder="Username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md text-sm"
             required
             autoComplete="username"
           />
@@ -71,14 +71,14 @@ function LoginForm({ onLogin }) {
             placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md text-sm"
             required
             autoComplete="current-password"
           />
           <button
             type="submit"
             disabled={loading}
-            className="w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400"
+            className="w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 disabled:bg-gray-400"
           >
             {loading ? <Loader className="animate-spin h-5 w-5" /> : <><LogIn className="h-4 w-4 mr-2" /> Sign In</>}
           </button>
@@ -101,15 +101,15 @@ function EventList({ events }) {
   };
 
   return (
-    <div className="bg-white shadow sm:rounded-lg mt-6">
+    <div className="bg-white dark:bg-gray-800 shadow sm:rounded-lg mt-6">
       <div className="px-4 py-5 sm:p-6">
-        <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">
+        <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-white mb-4">
           Recent Events
         </h3>
         {events.length === 0 ? (
-          <p className="text-sm text-gray-500">No events recorded yet.</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">No events recorded yet.</p>
         ) : (
-          <ul className="divide-y divide-gray-200">
+          <ul className="divide-y divide-gray-200 dark:divide-gray-700">
             {events.map((event, index) => (
               <li key={index} className="py-3 flex items-center justify-between">
                 <div className="flex items-center">
@@ -118,11 +118,11 @@ function EventList({ events }) {
                   ) : (
                     <DoorClosed className="h-5 w-5 text-red-400 mr-3" />
                   )}
-                  <span className="text-sm font-medium text-gray-900">
+                  <span className="text-sm font-medium text-gray-900 dark:text-gray-200">
                     Garage {event[0]}
                   </span>
                 </div>
-                <span className="text-sm text-gray-500">
+                <span className="text-sm text-gray-500 dark:text-gray-400">
                   {formatEventTime(event[1])}
                 </span>
               </li>
@@ -138,22 +138,22 @@ function LPRNotification({ countdown, plate, onCancel, isAuthenticated }) {
   if (countdown <= 0) return null;
 
   return (
-    <div className="fixed top-4 right-4 max-w-sm w-full bg-yellow-50 border-l-4 border-yellow-400 p-4 shadow-lg rounded-lg z-50 animate-pulse">
+    <div className="fixed top-4 right-4 max-w-sm w-full bg-yellow-50 dark:bg-yellow-900/40 border-l-4 border-yellow-400 p-4 shadow-lg rounded-lg z-50 animate-pulse">
       <div className="flex">
         <div className="flex-shrink-0">
           <AlertTriangle className="h-5 w-5 text-yellow-400" />
         </div>
         <div className="ml-3 flex-1">
-          <p className="text-sm font-medium text-yellow-800">
+          <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
             Auto-closing in {countdown} seconds
           </p>
-          <p className="text-xs text-yellow-700 mt-1">
+          <p className="text-xs text-yellow-700 dark:text-yellow-300 mt-1">
             Detected: {plate}
           </p>
           {isAuthenticated && (
             <button
               onClick={onCancel}
-              className="mt-2 text-xs font-medium text-yellow-800 hover:text-yellow-900 underline"
+              className="mt-2 text-xs font-medium text-yellow-800 dark:text-yellow-200 hover:text-yellow-900 dark:hover:text-yellow-100 underline"
             >
               Cancel auto-close
             </button>
@@ -223,16 +223,16 @@ function LPRManagement({ isAuthenticated }) {
   };
 
   return (
-    <div className="bg-white shadow sm:rounded-lg mt-6">
+    <div className="bg-white dark:bg-gray-800 shadow sm:rounded-lg mt-6">
       <div className="px-4 py-5 sm:p-6">
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg leading-6 font-medium text-gray-900">
+          <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-white">
             Authorized Plates
           </h3>
           {isAuthenticated && (
             <button
               onClick={() => setShowForm(!showForm)}
-              className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
+              className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600"
             >
               <Plus className="h-4 w-4 mr-1" />
               Add Plate
@@ -241,14 +241,14 @@ function LPRManagement({ isAuthenticated }) {
         </div>
 
         {showForm && isAuthenticated && (
-          <form onSubmit={addPlate} className="mb-4 p-4 bg-gray-50 rounded-lg">
+          <form onSubmit={addPlate} className="mb-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
             <div className="grid grid-cols-2 gap-3">
               <input
                 type="text"
                 placeholder="Plate Number"
                 value={newPlate}
                 onChange={(e) => setNewPlate(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+                className="px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-white rounded-md text-sm"
                 required
               />
               <input
@@ -256,21 +256,21 @@ function LPRManagement({ isAuthenticated }) {
                 placeholder="Owner Name"
                 value={newOwner}
                 onChange={(e) => setNewOwner(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+                className="px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-white rounded-md text-sm"
               />
             </div>
             <div className="mt-3 flex gap-2">
               <button
                 type="submit"
                 disabled={loading}
-                className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 disabled:bg-gray-400"
+                className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 disabled:bg-gray-400"
               >
                 {loading ? 'Adding...' : 'Add'}
               </button>
               <button
                 type="button"
                 onClick={() => setShowForm(false)}
-                className="px-4 py-2 bg-gray-300 text-gray-700 text-sm rounded-md hover:bg-gray-400"
+                className="px-4 py-2 bg-gray-300 dark:bg-gray-600 text-gray-700 dark:text-gray-200 text-sm rounded-md hover:bg-gray-400 dark:hover:bg-gray-500"
               >
                 Cancel
               </button>
@@ -278,22 +278,22 @@ function LPRManagement({ isAuthenticated }) {
           </form>
         )}
 
-        <ul className="divide-y divide-gray-200">
+        <ul className="divide-y divide-gray-200 dark:divide-gray-700">
           {plates.filter(p => p.active).map((plate, index) => (
             <li key={index} className="py-3 flex items-center justify-between">
               <div className="flex items-center">
                 <Car className="h-5 w-5 text-indigo-400 mr-3" />
                 <div>
-                  <span className="text-sm font-medium text-gray-900">{plate.plate}</span>
+                  <span className="text-sm font-medium text-gray-900 dark:text-gray-200">{plate.plate}</span>
                   {plate.owner && (
-                    <span className="text-xs text-gray-500 ml-2">({plate.owner})</span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">({plate.owner})</span>
                   )}
                 </div>
               </div>
               {isAuthenticated && (
                 <button
                   onClick={() => removePlate(plate.plate)}
-                  className="text-red-600 hover:text-red-800"
+                  className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -301,7 +301,7 @@ function LPRManagement({ isAuthenticated }) {
             </li>
           ))}
           {plates.filter(p => p.active).length === 0 && (
-            <li className="py-3 text-sm text-gray-500">No authorized plates yet</li>
+            <li className="py-3 text-sm text-gray-500 dark:text-gray-400">No authorized plates yet</li>
           )}
         </ul>
       </div>
@@ -318,6 +318,27 @@ export default function App() {
   const [pendingPlate, setPendingPlate] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [username, setUsername] = useState('');
+  const [isDarkMode, setIsDarkMode] = useState(false);
+
+  // Dark mode: load saved preference
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme === 'dark') {
+      setIsDarkMode(true);
+      document.documentElement.classList.add('dark');
+    }
+  }, []);
+
+  const toggleDarkMode = () => {
+    if (isDarkMode) {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    } else {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    }
+    setIsDarkMode(!isDarkMode);
+  };
 
   // Check for existing token on load
   useEffect(() => {
@@ -460,23 +481,32 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center px-4 py-12">
+    <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center px-4 py-12">
       <LPRNotification countdown={countdown} plate={pendingPlate} onCancel={cancelAutoClose} isAuthenticated={isAuthenticated} />
 
       <div className="max-w-md w-full space-y-8">
         <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Garage Door Controller
-          </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
+          <div className="flex justify-center items-center gap-3">
+            <h2 className="text-center text-3xl font-extrabold text-gray-900 dark:text-white">
+              Garage Door Controller
+            </h2>
+            <button
+              onClick={toggleDarkMode}
+              className="p-2 rounded-full text-gray-500 dark:text-yellow-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+              title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            >
+              {isDarkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+            </button>
+          </div>
+          <p className="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">
             Monitor and control your garage door
           </p>
           {isAuthenticated && (
             <div className="mt-2 flex justify-center items-center gap-2">
-              <span className="text-xs text-green-600">Signed in as {username}</span>
+              <span className="text-xs text-green-600 dark:text-green-400">Signed in as {username}</span>
               <button
                 onClick={handleLogout}
-                className="inline-flex items-center text-xs text-gray-500 hover:text-gray-700"
+                className="inline-flex items-center text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
               >
                 <LogOut className="h-3 w-3 mr-1" />
                 Sign out
@@ -486,13 +516,13 @@ export default function App() {
         </div>
 
         <div className="mt-8 space-y-6">
-          <div className="bg-white shadow sm:rounded-lg">
+          <div className="bg-white dark:bg-gray-800 shadow sm:rounded-lg">
             <div className="px-4 py-5 sm:p-6">
-              <h3 className="text-lg leading-6 font-medium text-gray-900">
+              <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-white">
                 Current Status
               </h3>
               <div className="mt-5">
-                <div className="rounded-md bg-gray-50 px-6 py-5 sm:flex sm:items-start sm:justify-between">
+                <div className="rounded-md bg-gray-50 dark:bg-gray-700 px-6 py-5 sm:flex sm:items-start sm:justify-between">
                   <div className="sm:flex sm:items-center w-full">
                     {status === 'Open' ? (
                       <DoorOpen className="h-8 w-8 text-green-400" aria-hidden="true" />
@@ -502,11 +532,11 @@ export default function App() {
                       <Loader className="h-8 w-8 text-gray-400 animate-spin" aria-hidden="true" />
                     )}
                     <div className="mt-3 sm:mt-0 sm:ml-4 flex-1">
-                      <div className="text-sm font-medium text-gray-900">
+                      <div className="text-sm font-medium text-gray-900 dark:text-gray-200">
                         The garage door is currently {status.toLowerCase()}
                       </div>
                       {countdown > 0 && (
-                        <div className="mt-2 flex items-center text-yellow-700 text-xs">
+                        <div className="mt-2 flex items-center text-yellow-700 dark:text-yellow-400 text-xs">
                           <Clock className="h-4 w-4 mr-1" />
                           Closing in {countdown}s
                         </div>
@@ -526,7 +556,7 @@ export default function App() {
                 className={`flex-1 group relative flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white ${
                   loading
                     ? 'bg-gray-400 cursor-not-allowed'
-                    : 'bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500'
+                    : 'bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500'
                 }`}
               >
                 {loading ? (
@@ -538,7 +568,7 @@ export default function App() {
               {countdown > 0 && (
                 <button
                   onClick={cancelAutoClose}
-                  className="px-4 py-2 border border-red-300 text-sm font-medium rounded-md text-red-700 bg-white hover:bg-red-50"
+                  className="px-4 py-2 border border-red-300 dark:border-red-600 text-sm font-medium rounded-md text-red-700 dark:text-red-400 bg-white dark:bg-gray-800 hover:bg-red-50 dark:hover:bg-red-900/20"
                 >
                   Cancel
                 </button>
@@ -552,7 +582,7 @@ export default function App() {
           <LPRManagement isAuthenticated={isAuthenticated} />
 
           <div className="text-center mt-4">
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
               Last updated: {formatLastUpdated(lastUpdated)}
             </p>
           </div>
