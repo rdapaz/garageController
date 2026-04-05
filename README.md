@@ -9,11 +9,14 @@ A web-based garage door controller using a Raspberry Pi, ultrasonic sensor (HC-S
 - **Authorised plate management** with web UI and API
 - **Plate normalisation** (hyphens, spaces, and case are stripped automatically)
 - **Auto-close countdown** (60s) with cancellable WebSocket notifications
-- React frontend with Tailwind CSS
+- **JWT authentication** with bcrypt password hashing and rate-limited login
+- **Dark mode** with Sun/Moon toggle (persisted in localStorage)
+- React frontend with Tailwind CSS and custom garage door SVG icons
 - Timezone-aware timestamps (UTC storage, local display in en-AU)
-- WebSocket support for live status updates
+- WebSocket support for live status updates (auto-detects ws/wss)
+- **HTTPS support** via self-signed certificate for reverse proxy re-encryption
 - Optional MQTT integration for Home Assistant / monitoring
-- Nginx reverse proxy with WebSocket passthrough
+- Nginx reverse proxy with HTTP and HTTPS + WebSocket passthrough
 - Mobile-responsive design
 
 ## Hardware Requirements
@@ -202,9 +205,56 @@ nohup /home/pi/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8080 > /tmp/uvico
 
 > **Note:** The legacy uWSGI service (`garage-controller.service`) should be stopped and disabled. Only one instance of the app should run at a time to avoid SQLite database locking errors.
 
+### 6. HTTPS Setup (for external access via reverse proxy)
+
+If exposing the controller through a reverse proxy with SSL re-encryption (e.g., Kemp LoadMaster), generate a self-signed certificate:
+
+```bash
+sudo mkdir -p /etc/nginx/ssl
+sudo openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+  -keyout /etc/nginx/ssl/garage.key \
+  -out /etc/nginx/ssl/garage.crt \
+  -subj "/CN=gge.ricdeez.com"
+```
+
+Add an SSL server block to nginx (`/etc/nginx/sites-enabled/default`):
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name gge.ricdeez.com;
+
+    ssl_certificate /etc/nginx/ssl/garage.crt;
+    ssl_certificate_key /etc/nginx/ssl/garage.key;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /ws {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+    }
+}
+```
+
+The frontend automatically detects `https:` and uses `wss://` for WebSocket connections.
+
 ## Usage
 
-Access the web interface at `http://your-pi-ip-address` or `http://garagecontroller.local`
+- **Local access:** `http://192.168.1.143`
+- **External access:** `https://gge.ricdeez.com` (via Cloudflare + Kemp LB)
+- **Default credentials:** `admin` / `changeme` (change on first login)
 
 ## Troubleshooting
 
