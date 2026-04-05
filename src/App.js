@@ -1,6 +1,49 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { DoorOpen, DoorClosed, Loader, AlertTriangle, X, Plus, Trash2, Car, Clock, LogIn, LogOut, Lock, Sun, Moon } from 'lucide-react';
+import { Loader, AlertTriangle, X, Plus, Trash2, Car, Clock, LogIn, LogOut, Lock, Sun, Moon } from 'lucide-react';
+
+// Custom garage door icons (stroke-based, matches Lucide style)
+function GarageOpen({ className }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      {/* Garage frame */}
+      <path d="M3 21V8l9-5 9 5v13" />
+      {/* Opening / floor line */}
+      <line x1="3" y1="21" x2="21" y2="21" />
+      {/* Rolled-up door panels at top */}
+      <path d="M6 8h12" />
+      <path d="M6 10.5h12" />
+      {/* Side walls */}
+      <line x1="6" y1="8" x2="6" y2="21" />
+      <line x1="18" y1="8" x2="18" y2="21" />
+      {/* Car silhouette inside */}
+      <path d="M8 18h8M9 16h6l1 2H8l1-2z" />
+    </svg>
+  );
+}
+
+function GarageClosed({ className }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      {/* Garage frame */}
+      <path d="M3 21V8l9-5 9 5v13" />
+      {/* Floor line */}
+      <line x1="3" y1="21" x2="21" y2="21" />
+      {/* Door panels */}
+      <line x1="6" y1="9" x2="18" y2="9" />
+      <line x1="6" y1="12" x2="18" y2="12" />
+      <line x1="6" y1="15" x2="18" y2="15" />
+      <line x1="6" y1="18" x2="18" y2="18" />
+      {/* Side walls */}
+      <line x1="6" y1="8" x2="6" y2="21" />
+      <line x1="18" y1="8" x2="18" y2="21" />
+      {/* Door handle */}
+      <circle cx="16" cy="16.5" r="0.5" fill="currentColor" />
+    </svg>
+  );
+}
 
 // Configure axios interceptor for auth
 const getToken = () => localStorage.getItem('garage_token');
@@ -114,9 +157,9 @@ function EventList({ events }) {
               <li key={index} className="py-3 flex items-center justify-between">
                 <div className="flex items-center">
                   {event[0] === 'Open' ? (
-                    <DoorOpen className="h-5 w-5 text-green-400 mr-3" />
+                    <GarageOpen className="h-5 w-5 text-green-400 mr-3" />
                   ) : (
-                    <DoorClosed className="h-5 w-5 text-red-400 mr-3" />
+                    <GarageClosed className="h-5 w-5 text-red-400 mr-3" />
                   )}
                   <span className="text-sm font-medium text-gray-900 dark:text-gray-200">
                     Garage {event[0]}
@@ -525,9 +568,9 @@ export default function App() {
                 <div className="rounded-md bg-gray-50 dark:bg-gray-700 px-6 py-5 sm:flex sm:items-start sm:justify-between">
                   <div className="sm:flex sm:items-center w-full">
                     {status === 'Open' ? (
-                      <DoorOpen className="h-8 w-8 text-green-400" aria-hidden="true" />
+                      <GarageOpen className="h-8 w-8 text-green-400" aria-hidden="true" />
                     ) : status === 'Closed' ? (
-                      <DoorClosed className="h-8 w-8 text-red-400" aria-hidden="true" />
+                      <GarageClosed className="h-8 w-8 text-red-400" aria-hidden="true" />
                     ) : (
                       <Loader className="h-8 w-8 text-gray-400 animate-spin" aria-hidden="true" />
                     )}
