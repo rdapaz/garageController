@@ -364,7 +364,7 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [holdOpen, setHoldOpen] = useState(false);
   const [autoCloseCountdown, setAutoCloseCountdown] = useState(0);
-  const [doorOpenedAt, setDoorOpenedAt] = useState(null);
+  const [doorOpenedAt, setDoorOpenedAt] = useState(null); // UTC ISO string from backend
   const [doorOpenDuration, setDoorOpenDuration] = useState('');
 
   // Dark mode: load saved preference
@@ -429,15 +429,13 @@ export default function App() {
       const data = JSON.parse(event.data);
 
       if (data.type === 'status_update') {
-        setStatus((prev) => {
-          if (prev !== 'Open' && data.status === 'Open') {
-            setDoorOpenedAt(new Date());
-          } else if (data.status === 'Closed') {
-            setDoorOpenedAt(null);
-            setDoorOpenDuration('');
-          }
-          return data.status;
-        });
+        setStatus(data.status);
+        if (data.door_opened_at) {
+          setDoorOpenedAt(data.door_opened_at);
+        } else {
+          setDoorOpenedAt(null);
+          setDoorOpenDuration('');
+        }
         if (data.events) {
           setEvents(data.events);
         }
@@ -527,24 +525,18 @@ export default function App() {
     setLoading(false);
   };
 
-  // Door open duration ticker
+  // Door open duration ticker - uses backend UTC timestamp
   useEffect(() => {
     if (!doorOpenedAt) return;
+    const openedTime = new Date(doorOpenedAt);
     const tick = setInterval(() => {
-      const seconds = Math.floor((new Date() - doorOpenedAt) / 1000);
+      const seconds = Math.floor((new Date() - openedTime) / 1000);
       const mins = Math.floor(seconds / 60);
       const secs = seconds % 60;
       setDoorOpenDuration(mins > 0 ? `${mins}m ${secs}s` : `${secs}s`);
     }, 1000);
     return () => clearInterval(tick);
   }, [doorOpenedAt]);
-
-  // Set doorOpenedAt on initial load if door is already open
-  useEffect(() => {
-    if (status === 'Open' && !doorOpenedAt) {
-      setDoorOpenedAt(new Date());
-    }
-  }, [status, doorOpenedAt]);
 
   const toggleHoldOpen = async () => {
     try {

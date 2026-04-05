@@ -178,6 +178,7 @@ class GarageDoorController:
         self.auto_close_task = None
         self.auto_close_countdown = 0
         self.AUTO_CLOSE_MINUTES = 10
+        self.door_opened_at = None  # UTC timestamp when door opened
         
         # MQTT setup (optional - won't crash if broker unavailable)
         self.mqtt_client = mqtt.Client()
@@ -453,10 +454,10 @@ class GarageDoorController:
                     self.mqtt_client.publish("garage/status", new_status)
 
                 if new_status == "Open":
-                    # Door just opened - start safety timer
+                    self.door_opened_at = datetime.utcnow().isoformat() + "Z"
                     self.start_safety_timer()
                 elif new_status == "Closed":
-                    # Door closed - cancel all pending timers
+                    self.door_opened_at = None
                     self.cancel_all_timers()
 
                 asyncio.run(self.notify_clients(new_status))
@@ -550,7 +551,8 @@ async def websocket_endpoint(websocket: WebSocket):
             "countdown": controller.close_countdown,
             "pending_close_plate": controller.pending_close_plate,
             "hold_open": controller.hold_open,
-            "auto_close_countdown": controller.auto_close_countdown
+            "auto_close_countdown": controller.auto_close_countdown,
+            "door_opened_at": controller.door_opened_at
         })
         while True:
             await websocket.receive_text()
@@ -567,7 +569,8 @@ async def get_status():
         "countdown": controller.close_countdown,
         "pending_close_plate": controller.pending_close_plate,
         "hold_open": controller.hold_open,
-        "auto_close_countdown": controller.auto_close_countdown
+        "auto_close_countdown": controller.auto_close_countdown,
+        "door_opened_at": controller.door_opened_at
     }
 
 @app.get("/api/events")
