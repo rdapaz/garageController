@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Loader, AlertTriangle, X, Plus, Trash2, Car, Clock, LogIn, LogOut, Lock, Sun, Moon } from 'lucide-react';
+import { Loader, AlertTriangle, X, Plus, Trash2, Car, Clock, LogIn, LogOut, Lock, Sun, Moon, ShieldCheck, ShieldOff, Timer } from 'lucide-react';
 
 // Custom garage door icons (stroke-based, matches Lucide style)
 function GarageOpen({ className }) {
@@ -362,6 +362,10 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [username, setUsername] = useState('');
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [holdOpen, setHoldOpen] = useState(false);
+  const [autoCloseCountdown, setAutoCloseCountdown] = useState(0);
+  const [doorOpenedAt, setDoorOpenedAt] = useState(null);
+  const [doorOpenDuration, setDoorOpenDuration] = useState('');
 
   // Dark mode: load saved preference
   useEffect(() => {
@@ -425,7 +429,15 @@ export default function App() {
       const data = JSON.parse(event.data);
 
       if (data.type === 'status_update') {
-        setStatus(data.status);
+        setStatus((prev) => {
+          if (prev !== 'Open' && data.status === 'Open') {
+            setDoorOpenedAt(new Date());
+          } else if (data.status === 'Closed') {
+            setDoorOpenedAt(null);
+            setDoorOpenDuration('');
+          }
+          return data.status;
+        });
         if (data.events) {
           setEvents(data.events);
         }
@@ -435,6 +447,12 @@ export default function App() {
         if (data.pending_close_plate !== undefined) {
           setPendingPlate(data.pending_close_plate);
         }
+        if (data.hold_open !== undefined) {
+          setHoldOpen(data.hold_open);
+        }
+        if (data.auto_close_countdown !== undefined) {
+          setAutoCloseCountdown(data.auto_close_countdown);
+        }
         setLastUpdated(new Date());
       } else if (data.type === 'lpr_status') {
         if (data.data.action === 'countdown') {
@@ -443,6 +461,12 @@ export default function App() {
         } else if (data.data.action === 'cancelled' || data.data.action === 'cancelled_by_user') {
           setCountdown(0);
           setPendingPlate(null);
+        } else if (data.data.action === 'safety_countdown') {
+          setAutoCloseCountdown(data.data.seconds_remaining);
+        } else if (data.data.action === 'safety_closed') {
+          setAutoCloseCountdown(0);
+        } else if (data.data.action === 'hold_open_changed') {
+          setHoldOpen(data.data.hold_open);
         }
       }
     };
@@ -501,6 +525,36 @@ export default function App() {
       }
     }
     setLoading(false);
+  };
+
+  // Door open duration ticker
+  useEffect(() => {
+    if (!doorOpenedAt) return;
+    const tick = setInterval(() => {
+      const seconds = Math.floor((new Date() - doorOpenedAt) / 1000);
+      const mins = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      setDoorOpenDuration(mins > 0 ? `${mins}m ${secs}s` : `${secs}s`);
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [doorOpenedAt]);
+
+  // Set doorOpenedAt on initial load if door is already open
+  useEffect(() => {
+    if (status === 'Open' && !doorOpenedAt) {
+      setDoorOpenedAt(new Date());
+    }
+  }, [status, doorOpenedAt]);
+
+  const toggleHoldOpen = async () => {
+    try {
+      const response = await axios.post('/api/hold-open');
+      setHoldOpen(response.data.hold_open);
+    } catch (error) {
+      if (error.response?.status === 401) {
+        alert('Please sign in to toggle Hold Open');
+      }
+    }
   };
 
   const cancelAutoClose = async () => {
@@ -579,10 +633,28 @@ export default function App() {
                       <div className="text-sm font-medium text-gray-900 dark:text-gray-200">
                         The garage door is currently {status.toLowerCase()}
                       </div>
+                      {status === 'Open' && doorOpenDuration && (
+                        <div className="mt-1 flex items-center text-gray-500 dark:text-gray-400 text-xs">
+                          <Timer className="h-3 w-3 mr-1" />
+                          Open for {doorOpenDuration}
+                        </div>
+                      )}
+                      {holdOpen && (
+                        <div className="mt-1 flex items-center text-orange-600 dark:text-orange-400 text-xs font-medium">
+                          <ShieldCheck className="h-3 w-3 mr-1" />
+                          Hold Open active
+                        </div>
+                      )}
                       {countdown > 0 && (
-                        <div className="mt-2 flex items-center text-yellow-700 dark:text-yellow-400 text-xs">
+                        <div className="mt-1 flex items-center text-yellow-700 dark:text-yellow-400 text-xs">
                           <Clock className="h-4 w-4 mr-1" />
-                          Closing in {countdown}s
+                          LPR closing in {countdown}s
+                        </div>
+                      )}
+                      {autoCloseCountdown > 0 && !holdOpen && (
+                        <div className="mt-1 flex items-center text-red-600 dark:text-red-400 text-xs">
+                          <Clock className="h-3 w-3 mr-1" />
+                          Safety close in {Math.floor(autoCloseCountdown / 60)}m {autoCloseCountdown % 60}s
                         </div>
                       )}
                     </div>
@@ -593,30 +665,47 @@ export default function App() {
           </div>
 
           {isAuthenticated ? (
-            <div className="flex gap-2">
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <button
+                  onClick={toggleGarage}
+                  disabled={loading || holdOpen}
+                  className={`flex-1 group relative flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white ${
+                    loading || holdOpen
+                      ? 'bg-gray-400 cursor-not-allowed'
+                      : 'bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500'
+                  }`}
+                >
+                  {loading ? (
+                    <Loader className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" />
+                  ) : null}
+                  {loading ? 'Processing...' : holdOpen ? 'Hold Open Active' : 'Toggle Garage Door'}
+                </button>
+
+                {countdown > 0 && (
+                  <button
+                    onClick={cancelAutoClose}
+                    className="px-4 py-2 border border-red-300 dark:border-red-600 text-sm font-medium rounded-md text-red-700 dark:text-red-400 bg-white dark:bg-gray-800 hover:bg-red-50 dark:hover:bg-red-900/20"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+
               <button
-                onClick={toggleGarage}
-                disabled={loading}
-                className={`flex-1 group relative flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white ${
-                  loading
-                    ? 'bg-gray-400 cursor-not-allowed'
-                    : 'bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500'
+                onClick={toggleHoldOpen}
+                className={`w-full flex justify-center items-center py-2 px-4 text-sm font-medium rounded-md border ${
+                  holdOpen
+                    ? 'bg-orange-100 dark:bg-orange-900/30 border-orange-400 dark:border-orange-600 text-orange-700 dark:text-orange-400 hover:bg-orange-200 dark:hover:bg-orange-900/50'
+                    : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
                 }`}
               >
-                {loading ? (
-                  <Loader className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" />
-                ) : null}
-                {loading ? 'Processing...' : 'Toggle Garage Door'}
+                {holdOpen ? (
+                  <><ShieldCheck className="h-4 w-4 mr-2" /> Hold Open ON — Tap to Disable</>
+                ) : (
+                  <><ShieldOff className="h-4 w-4 mr-2" /> Hold Open OFF — Tap to Keep Open</>
+                )}
               </button>
-
-              {countdown > 0 && (
-                <button
-                  onClick={cancelAutoClose}
-                  className="px-4 py-2 border border-red-300 dark:border-red-600 text-sm font-medium rounded-md text-red-700 dark:text-red-400 bg-white dark:bg-gray-800 hover:bg-red-50 dark:hover:bg-red-900/20"
-                >
-                  Cancel
-                </button>
-              )}
             </div>
           ) : (
             <LoginForm onLogin={handleLogin} />

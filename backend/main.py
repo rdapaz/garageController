@@ -174,6 +174,10 @@ class GarageDoorController:
         self.pending_close_task = None
         self.pending_close_plate = None
         self.close_countdown = 0
+        self.hold_open = False
+        self.auto_close_task = None
+        self.auto_close_countdown = 0
+        self.AUTO_CLOSE_MINUTES = 10
         
         # MQTT setup (optional - won't crash if broker unavailable)
         self.mqtt_client = mqtt.Client()
@@ -340,6 +344,11 @@ class GarageDoorController:
             return {"status": "opened", "message": "Garage opened immediately"}
             
         elif current == "Open":
+            if self.hold_open:
+                print(f"[LPR] Hold Open active, ignoring close for {plate_number}")
+                self.record_lpr_event(plate_number, "hold_open_ignored", "Open", "Open", True)
+                return {"status": "hold_open", "message": "Hold Open is active, ignoring auto-close"}
+
             # SCHEDULE AUTO-CLOSE
             print(f"[LPR] Scheduling close for {plate_number}")
             self.pending_close_plate = plate_number
@@ -359,7 +368,7 @@ class GarageDoorController:
         return {"status": "error", "message": f"Unknown status: {current}"}
     
     def cancel_auto_close(self):
-        """Cancel pending auto-close"""
+        """Cancel pending LPR auto-close"""
         if self.pending_close_task and not self.pending_close_task.done():
             self.pending_close_task.cancel()
             plate = self.pending_close_plate
@@ -368,6 +377,70 @@ class GarageDoorController:
             print(f"[LPR] Auto-close cancelled by user for {plate}")
             return True
         return False
+
+    def cancel_all_timers(self):
+        """Cancel both LPR auto-close and safety timer"""
+        self.cancel_auto_close()
+        if self.auto_close_task and not self.auto_close_task.done():
+            self.auto_close_task.cancel()
+            self.auto_close_countdown = 0
+            print("[TIMER] Safety auto-close timer cancelled")
+
+    async def safety_auto_close_timer(self):
+        """10-minute safety timer - closes garage if left open too long"""
+        try:
+            total_seconds = self.AUTO_CLOSE_MINUTES * 60
+            self.auto_close_countdown = total_seconds
+            print(f"[TIMER] Safety auto-close timer started ({self.AUTO_CLOSE_MINUTES} minutes)")
+
+            while self.auto_close_countdown > 0:
+                await self.broadcast_lpr_status({
+                    "action": "safety_countdown",
+                    "seconds_remaining": self.auto_close_countdown
+                })
+                wait_time = min(30, self.auto_close_countdown)
+                await asyncio.sleep(wait_time)
+                self.auto_close_countdown -= wait_time
+
+            if self.current_status == "Open" and not self.hold_open:
+                print("[TIMER] Safety auto-close triggered - closing garage")
+                self.toggle_garage()
+                self.record_status_change("Closed")
+                await self.broadcast_lpr_status({
+                    "action": "safety_closed"
+                })
+
+            self.auto_close_countdown = 0
+
+        except asyncio.CancelledError:
+            print("[TIMER] Safety auto-close timer cancelled")
+            self.auto_close_countdown = 0
+
+    def start_safety_timer(self):
+        """Start the safety auto-close timer if not in hold_open mode"""
+        if self.hold_open:
+            print("[TIMER] Hold Open active, skipping safety timer")
+            return
+        # Cancel existing timer if running
+        if self.auto_close_task and not self.auto_close_task.done():
+            self.auto_close_task.cancel()
+        try:
+            loop = asyncio.get_event_loop()
+            self.auto_close_task = loop.create_task(self.safety_auto_close_timer())
+        except RuntimeError:
+            pass  # No event loop in monitor thread
+
+    def set_hold_open(self, enabled):
+        """Toggle hold open mode"""
+        self.hold_open = enabled
+        if enabled:
+            print("[HOLD] Hold Open ENABLED - all auto-close disabled")
+            self.cancel_all_timers()
+        else:
+            print("[HOLD] Hold Open DISABLED")
+            # If door is currently open, start the safety timer
+            if self.current_status == "Open":
+                self.start_safety_timer()
     
     def monitor_status(self):
         while True:
@@ -378,12 +451,14 @@ class GarageDoorController:
                 self.record_status_change(new_status)
                 if self.mqtt_connected:
                     self.mqtt_client.publish("garage/status", new_status)
-                
-                # If door was manually closed during pending auto-close, cancel it
-                if new_status == "Closed" and self.pending_close_task and not self.pending_close_task.done():
-                    self.pending_close_task.cancel()
-                    print("Door manually closed, cancelled auto-close task")
-                
+
+                if new_status == "Open":
+                    # Door just opened - start safety timer
+                    self.start_safety_timer()
+                elif new_status == "Closed":
+                    # Door closed - cancel all pending timers
+                    self.cancel_all_timers()
+
                 asyncio.run(self.notify_clients(new_status))
             time.sleep(1)
     
@@ -393,10 +468,12 @@ class GarageDoorController:
             try:
                 await websocket.send_json({
                     "type": "status_update",
-                    "status": status, 
+                    "status": status,
                     "events": events,
                     "countdown": self.close_countdown,
-                    "pending_close_plate": self.pending_close_plate
+                    "pending_close_plate": self.pending_close_plate,
+                    "hold_open": self.hold_open,
+                    "auto_close_countdown": self.auto_close_countdown
                 })
             except Exception as e:
                 print(f"Error sending to websocket: {e}")
@@ -468,10 +545,12 @@ async def websocket_endpoint(websocket: WebSocket):
         events = controller.get_last_10_events()
         await websocket.send_json({
             "type": "status_update",
-            "status": controller.current_status, 
+            "status": controller.current_status,
             "events": events,
             "countdown": controller.close_countdown,
-            "pending_close_plate": controller.pending_close_plate
+            "pending_close_plate": controller.pending_close_plate,
+            "hold_open": controller.hold_open,
+            "auto_close_countdown": controller.auto_close_countdown
         })
         while True:
             await websocket.receive_text()
@@ -486,7 +565,9 @@ async def get_status():
     return {
         "status": controller.current_status,
         "countdown": controller.close_countdown,
-        "pending_close_plate": controller.pending_close_plate
+        "pending_close_plate": controller.pending_close_plate,
+        "hold_open": controller.hold_open,
+        "auto_close_countdown": controller.auto_close_countdown
     }
 
 @app.get("/api/events")
@@ -539,6 +620,17 @@ async def cancel_auto_close(user: str = Depends(get_current_user)):
         await controller.broadcast_lpr_status({"action": "cancelled_by_user"})
         return {"status": "success", "message": "Auto-close cancelled"}
     return {"status": "error", "message": "No pending auto-close"}
+
+@app.post("/api/hold-open")
+async def toggle_hold_open(user: str = Depends(get_current_user)):
+    """Toggle hold open mode"""
+    controller.set_hold_open(not controller.hold_open)
+    await controller.broadcast_lpr_status({
+        "action": "hold_open_changed",
+        "hold_open": controller.hold_open
+    })
+    status = "enabled" if controller.hold_open else "disabled"
+    return {"status": "success", "hold_open": controller.hold_open, "message": f"Hold Open {status}"}
 
 @app.post("/api/lpr/plates")
 async def add_authorized_plate(plate: AuthorizedPlate, user: str = Depends(get_current_user)):
