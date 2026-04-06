@@ -13,6 +13,10 @@ from typing import Optional
 import jwt
 import os
 import bcrypt as bcrypt_lib
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logger = logging.getLogger("garage")
 
 app = FastAPI()
 security = HTTPBearer(auto_error=False)
@@ -124,15 +128,15 @@ def init_admin():
                      ("admin", hashed))
             conn.commit()
             if default_password == "changeme":
-                print("[AUTH] WARNING: Default admin password in use. Set GARAGE_ADMIN_PASSWORD env var or change via API.")
+                logger.info("[AUTH] WARNING: Default admin password in use. Set GARAGE_ADMIN_PASSWORD env var or change via API.")
             else:
-                print("[AUTH] Admin user created with custom password")
+                logger.info("[AUTH] Admin user created with custom password")
         else:
             # Verify existing hash is valid, reset if corrupted
             try:
                 verify_password("test", row[0])
             except Exception:
-                print("[AUTH] Existing password hash is corrupted, resetting to default")
+                logger.info("[AUTH] Existing password hash is corrupted, resetting to default")
                 c.execute("UPDATE admin_user SET password_hash = ? WHERE username = 'admin'", (hashed,))
                 conn.commit()
 
@@ -178,7 +182,9 @@ class GarageDoorController:
         self.auto_close_task = None
         self.auto_close_countdown = 0
         self.AUTO_CLOSE_MINUTES = 10
+        self.LPR_CLOSE_SECONDS = 60
         self.door_opened_at = None  # UTC timestamp when door opened
+        self.main_loop = None  # Reference to main asyncio event loop
         
         # MQTT setup (optional - won't crash if broker unavailable)
         self.mqtt_client = mqtt.Client()
@@ -186,10 +192,10 @@ class GarageDoorController:
             self.mqtt_client.connect("localhost", 1883, 60)
             self.mqtt_client.loop_start()
             self.mqtt_connected = True
-            print("[MQTT] Connected to broker")
+            logger.info("[MQTT] Connected to broker")
         except Exception as e:
             self.mqtt_connected = False
-            print(f"[MQTT] Broker unavailable, continuing without MQTT: {e}")
+            logger.info(f"[MQTT] Broker unavailable, continuing without MQTT: {e}")
         
         # Start continuous monitoring
         threading.Thread(target=self.monitor_status, daemon=True).start()
@@ -280,19 +286,19 @@ class GarageDoorController:
             
             # Check if door is still open
             if self.current_status == "Open":
-                print(f"[LPR] Auto-closing garage for {plate_number}")
+                logger.info(f"[LPR] Auto-closing garage for {plate_number}")
                 self.toggle_garage()
                 self.record_lpr_event(plate_number, "auto_close", "Open", "Closed", True)
                 if self.mqtt_connected:
                     self.mqtt_client.publish("garage/lpr/auto_closed", plate_number)
             else:
-                print(f"[LPR] Garage already closed, skipping")
+                logger.info(f"[LPR] Garage already closed, skipping")
             
             self.close_countdown = 0
             self.pending_close_plate = None
             
         except asyncio.CancelledError:
-            print(f"[LPR] Auto-close cancelled for {plate_number}")
+            logger.info(f"[LPR] Auto-close cancelled for {plate_number}")
             self.close_countdown = 0
             self.pending_close_plate = None
             await self.broadcast_lpr_status({
@@ -306,7 +312,7 @@ class GarageDoorController:
             try:
                 await websocket.send_json({"type": "lpr_status", "data": data})
             except Exception as e:
-                print(f"Error sending LPR status: {e}")
+                logger.info(f"Error sending LPR status: {e}")
     
     async def handle_lpr_detection(self, plate_number):
         """Main LPR logic"""
@@ -314,7 +320,7 @@ class GarageDoorController:
 
         # Check authorization
         if not self.is_plate_authorized(plate_number):
-            print(f"[LPR] UNAUTHORIZED plate: {plate_number}")
+            logger.info(f"[LPR] UNAUTHORIZED plate: {plate_number}")
             self.record_lpr_event(plate_number, "rejected", self.current_status, None, False)
             if self.mqtt_connected:
                 self.mqtt_client.publish("garage/lpr/unauthorized", plate_number)
@@ -327,13 +333,13 @@ class GarageDoorController:
         # Cancel any pending auto-close
         if self.pending_close_task and not self.pending_close_task.done():
             self.pending_close_task.cancel()
-            print("[LPR] Cancelled pending auto-close due to new detection")
+            logger.info("[LPR] Cancelled pending auto-close due to new detection")
         
         current = self.current_status
         
         if current == "Closed":
             # OPEN IMMEDIATELY
-            print(f"[LPR] Opening garage for {plate_number}")
+            logger.info(f"[LPR] Opening garage for {plate_number}")
             self.toggle_garage()
             self.record_lpr_event(plate_number, "open_immediate", "Closed", "Open", True)
             if self.mqtt_connected:
@@ -346,15 +352,15 @@ class GarageDoorController:
             
         elif current == "Open":
             if self.hold_open:
-                print(f"[LPR] Hold Open active, ignoring close for {plate_number}")
+                logger.info(f"[LPR] Hold Open active, ignoring close for {plate_number}")
                 self.record_lpr_event(plate_number, "hold_open_ignored", "Open", "Open", True)
                 return {"status": "hold_open", "message": "Hold Open is active, ignoring auto-close"}
 
             # SCHEDULE AUTO-CLOSE
-            print(f"[LPR] Scheduling close for {plate_number}")
+            logger.info(f"[LPR] Scheduling close for {plate_number}")
             self.pending_close_plate = plate_number
             self.pending_close_task = asyncio.create_task(
-                self.auto_close_with_countdown(plate_number, 60)
+                self.auto_close_with_countdown(plate_number, self.LPR_CLOSE_SECONDS)
             )
             self.record_lpr_event(plate_number, "close_scheduled", "Open", "Pending", True)
             if self.mqtt_connected:
@@ -375,24 +381,29 @@ class GarageDoorController:
             plate = self.pending_close_plate
             self.pending_close_plate = None
             self.close_countdown = 0
-            print(f"[LPR] Auto-close cancelled by user for {plate}")
+            logger.info(f"[LPR] Auto-close cancelled by user for {plate}")
             return True
         return False
 
     def cancel_all_timers(self):
         """Cancel both LPR auto-close and safety timer"""
         self.cancel_auto_close()
-        if self.auto_close_task and not self.auto_close_task.done():
-            self.auto_close_task.cancel()
+        if self.auto_close_task:
+            try:
+                if not self.auto_close_task.done():
+                    self.auto_close_task.cancel()
+            except Exception:
+                pass
             self.auto_close_countdown = 0
-            print("[TIMER] Safety auto-close timer cancelled")
+            self.auto_close_task = None
+            logger.info("[TIMER] Safety auto-close timer cancelled")
 
     async def safety_auto_close_timer(self):
         """10-minute safety timer - closes garage if left open too long"""
         try:
             total_seconds = self.AUTO_CLOSE_MINUTES * 60
             self.auto_close_countdown = total_seconds
-            print(f"[TIMER] Safety auto-close timer started ({self.AUTO_CLOSE_MINUTES} minutes)")
+            logger.info(f"[TIMER] Safety auto-close timer started ({self.AUTO_CLOSE_MINUTES} minutes)")
 
             while self.auto_close_countdown > 0:
                 await self.broadcast_lpr_status({
@@ -404,7 +415,7 @@ class GarageDoorController:
                 self.auto_close_countdown -= wait_time
 
             if self.current_status == "Open" and not self.hold_open:
-                print("[TIMER] Safety auto-close triggered - closing garage")
+                logger.info("[TIMER] Safety auto-close triggered - closing garage")
                 self.toggle_garage()
                 self.record_status_change("Closed")
                 await self.broadcast_lpr_status({
@@ -414,31 +425,32 @@ class GarageDoorController:
             self.auto_close_countdown = 0
 
         except asyncio.CancelledError:
-            print("[TIMER] Safety auto-close timer cancelled")
+            logger.info("[TIMER] Safety auto-close timer cancelled")
             self.auto_close_countdown = 0
 
     def start_safety_timer(self):
         """Start the safety auto-close timer if not in hold_open mode"""
         if self.hold_open:
-            print("[TIMER] Hold Open active, skipping safety timer")
+            logger.info("[TIMER] Hold Open active, skipping safety timer")
             return
         # Cancel existing timer if running
         if self.auto_close_task and not self.auto_close_task.done():
             self.auto_close_task.cancel()
-        try:
-            loop = asyncio.get_event_loop()
-            self.auto_close_task = loop.create_task(self.safety_auto_close_timer())
-        except RuntimeError:
-            pass  # No event loop in monitor thread
+        if self.main_loop:
+            future = asyncio.run_coroutine_threadsafe(self.safety_auto_close_timer(), self.main_loop)
+            self.auto_close_task = future
+            logger.info("[TIMER] Safety timer scheduled on main event loop")
+        else:
+            logger.info("[TIMER] WARNING: No main event loop available, safety timer not started")
 
     def set_hold_open(self, enabled):
         """Toggle hold open mode"""
         self.hold_open = enabled
         if enabled:
-            print("[HOLD] Hold Open ENABLED - all auto-close disabled")
+            logger.info("[HOLD] Hold Open ENABLED - all auto-close disabled")
             self.cancel_all_timers()
         else:
-            print("[HOLD] Hold Open DISABLED")
+            logger.info("[HOLD] Hold Open DISABLED")
             # If door is currently open, start the safety timer
             if self.current_status == "Open":
                 self.start_safety_timer()
@@ -477,7 +489,7 @@ class GarageDoorController:
                     "auto_close_countdown": self.auto_close_countdown
                 })
             except Exception as e:
-                print(f"Error sending to websocket: {e}")
+                logger.info(f"Error sending to websocket: {e}")
     
     def toggle_garage(self):
         GPIO.output(self.RELAY_OUT, True)
@@ -486,6 +498,12 @@ class GarageDoorController:
         return self.current_status
 
 controller = GarageDoorController()
+
+@app.on_event("startup")
+async def startup_event():
+    """Capture the main event loop so background threads can schedule async tasks"""
+    controller.main_loop = asyncio.get_event_loop()
+    logger.info("[STARTUP] Main event loop captured for background thread task scheduling")
 
 # Login attempt tracking for rate limiting
 login_attempts = {}
@@ -557,7 +575,7 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             await websocket.receive_text()
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        logger.info(f"WebSocket error: {e}")
     finally:
         controller.connected_websockets.remove(websocket)
 
@@ -634,6 +652,46 @@ async def toggle_hold_open(user: str = Depends(get_current_user)):
     })
     status = "enabled" if controller.hold_open else "disabled"
     return {"status": "success", "hold_open": controller.hold_open, "message": f"Hold Open {status}"}
+
+@app.get("/api/settings")
+async def get_settings():
+    """Get current timer settings"""
+    return {
+        "auto_close_minutes": controller.AUTO_CLOSE_MINUTES,
+        "lpr_close_seconds": controller.LPR_CLOSE_SECONDS,
+        "hold_open": controller.hold_open
+    }
+
+@app.post("/api/settings")
+async def update_settings(settings: dict, user: str = Depends(get_current_user)):
+    """Update timer settings"""
+    if "auto_close_minutes" in settings:
+        val = max(1, min(60, int(settings["auto_close_minutes"])))
+        controller.AUTO_CLOSE_MINUTES = val
+        logger.info(f"[SETTINGS] Safety timer set to {val} minutes")
+    if "lpr_close_seconds" in settings:
+        val = max(10, min(300, int(settings["lpr_close_seconds"])))
+        controller.LPR_CLOSE_SECONDS = val
+        logger.info(f"[SETTINGS] LPR close timer set to {val} seconds")
+    return {
+        "status": "success",
+        "auto_close_minutes": controller.AUTO_CLOSE_MINUTES,
+        "lpr_close_seconds": controller.LPR_CLOSE_SECONDS
+    }
+
+@app.get("/api/logs")
+async def get_logs(lines: int = 50, user: str = Depends(get_current_user)):
+    """Get recent application logs"""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["/usr/bin/journalctl", "-u", "garage-controller", "--no-pager", "-n", str(min(lines, 200))],
+            capture_output=True, text=True, timeout=5
+        )
+        log_lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
+        return {"logs": log_lines}
+    except Exception as e:
+        return {"logs": [f"Error reading logs: {str(e)}"]}
 
 @app.post("/api/lpr/plates")
 async def add_authorized_plate(plate: AuthorizedPlate, user: str = Depends(get_current_user)):

@@ -352,6 +352,163 @@ function LPRManagement({ isAuthenticated }) {
   );
 }
 
+function SettingsPanel({ isAuthenticated }) {
+  const [autoCloseMin, setAutoCloseMin] = useState(10);
+  const [lprCloseSec, setLprCloseSec] = useState(60);
+  const [showSettings, setShowSettings] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    axios.get('/api/settings').then(res => {
+      setAutoCloseMin(res.data.auto_close_minutes);
+      setLprCloseSec(res.data.lpr_close_seconds);
+    }).catch(() => {});
+  }, []);
+
+  const saveSettings = async () => {
+    setSaving(true);
+    try {
+      const res = await axios.post('/api/settings', {
+        auto_close_minutes: autoCloseMin,
+        lpr_close_seconds: lprCloseSec
+      });
+      setAutoCloseMin(res.data.auto_close_minutes);
+      setLprCloseSec(res.data.lpr_close_seconds);
+    } catch (error) {
+      alert('Error saving settings');
+    }
+    setSaving(false);
+  };
+
+  if (!isAuthenticated) return null;
+
+  return (
+    <div className="bg-white dark:bg-gray-800 shadow sm:rounded-lg mt-6">
+      <div className="px-4 py-5 sm:p-6">
+        <button
+          onClick={() => setShowSettings(!showSettings)}
+          className="flex items-center justify-between w-full"
+        >
+          <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-white">
+            Timer Settings
+          </h3>
+          <span className="text-xs text-gray-500 dark:text-gray-400">{showSettings ? 'Hide' : 'Show'}</span>
+        </button>
+
+        {showSettings && (
+          <div className="mt-4 space-y-4">
+            <div>
+              <label className="flex justify-between text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <span>Safety Auto-Close</span>
+                <span className="text-indigo-600 dark:text-indigo-400">{autoCloseMin} min</span>
+              </label>
+              <input
+                type="range"
+                min="1"
+                max="30"
+                value={autoCloseMin}
+                onChange={(e) => setAutoCloseMin(parseInt(e.target.value))}
+                className="w-full h-2 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+              />
+              <div className="flex justify-between text-xs text-gray-400 mt-1">
+                <span>1 min</span>
+                <span>30 min</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="flex justify-between text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <span>LPR Auto-Close Delay</span>
+                <span className="text-indigo-600 dark:text-indigo-400">{lprCloseSec} sec</span>
+              </label>
+              <input
+                type="range"
+                min="10"
+                max="300"
+                step="10"
+                value={lprCloseSec}
+                onChange={(e) => setLprCloseSec(parseInt(e.target.value))}
+                className="w-full h-2 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+              />
+              <div className="flex justify-between text-xs text-gray-400 mt-1">
+                <span>10 sec</span>
+                <span>5 min</span>
+              </div>
+            </div>
+
+            <button
+              onClick={saveSettings}
+              disabled={saving}
+              className="w-full py-2 px-4 bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white text-sm font-medium rounded-md disabled:bg-gray-400"
+            >
+              {saving ? 'Saving...' : 'Save Settings'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LogViewer({ isAuthenticated }) {
+  const [logs, setLogs] = useState([]);
+  const [showLogs, setShowLogs] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const fetchLogs = async () => {
+    setLoading(true);
+    try {
+      const res = await axios.get('/api/logs?lines=50');
+      setLogs(res.data.logs);
+    } catch (error) {
+      setLogs(['Error fetching logs']);
+    }
+    setLoading(false);
+  };
+
+  if (!isAuthenticated) return null;
+
+  return (
+    <div className="bg-white dark:bg-gray-800 shadow sm:rounded-lg mt-6">
+      <div className="px-4 py-5 sm:p-6">
+        <button
+          onClick={() => { setShowLogs(!showLogs); if (!showLogs) fetchLogs(); }}
+          className="flex items-center justify-between w-full"
+        >
+          <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-white">
+            System Logs
+          </h3>
+          <span className="text-xs text-gray-500 dark:text-gray-400">{showLogs ? 'Hide' : 'Show'}</span>
+        </button>
+
+        {showLogs && (
+          <div className="mt-4">
+            <div className="flex justify-end mb-2">
+              <button
+                onClick={fetchLogs}
+                disabled={loading}
+                className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300"
+              >
+                {loading ? 'Loading...' : 'Refresh'}
+              </button>
+            </div>
+            <div className="bg-gray-900 dark:bg-black rounded-lg p-3 max-h-64 overflow-y-auto">
+              {logs.map((line, i) => (
+                <div key={i} className="text-xs font-mono text-green-400 leading-5 whitespace-pre-wrap break-all">
+                  {line}
+                </div>
+              ))}
+              {logs.length === 0 && (
+                <div className="text-xs text-gray-500">No logs available</div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [status, setStatus] = useState('Unknown');
   const [events, setEvents] = useState([]);
@@ -705,6 +862,8 @@ export default function App() {
 
           <EventList events={events} />
           <LPRManagement isAuthenticated={isAuthenticated} />
+          <SettingsPanel isAuthenticated={isAuthenticated} />
+          <LogViewer isAuthenticated={isAuthenticated} />
 
           <div className="text-center mt-4">
             <p className="text-sm text-gray-500 dark:text-gray-400">
